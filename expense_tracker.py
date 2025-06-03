@@ -114,80 +114,128 @@ def get_user_id(username):
 
 def get_expenses(user_id, query=None, params=None):
     conn = sqlite3.connect("expense_tracker.db")
-    if query is None:
-        query = "SELECT * FROM expenses WHERE user_id = ? ORDER BY date DESC"
-        params = (user_id,)
-    else:
-        params = (user_id,) + tuple(params) if params else (user_id,)
-    df = pd.read_sql(query, conn, params=params)
-    conn.close()
-    return df
+    try:
+        if query is None:
+            query = "SELECT * FROM expenses WHERE user_id = ? ORDER BY date DESC"
+            df = pd.read_sql(query, conn, params=[user_id])
+        else:
+            # Build the complete parameter list
+            if params is None:
+                df = pd.read_sql(query, conn, params=[user_id])
+            else:
+                # Combine user_id with additional params
+                all_params = [user_id] + list(params)
+                df = pd.read_sql(query, conn, params=all_params)
+        return df
+    except Exception as e:
+        st.error(f"Database error: {str(e)}")
+        # Return empty DataFrame with expected columns
+        return pd.DataFrame(columns=['id', 'user_id', 'date', 'amount', 'category', 'description', 'tags', 'payment_method', 'recurring'])
+    finally:
+        conn.close()
 
 def get_recent_expenses(user_id):
-    return get_expenses(user_id, "SELECT date, amount, category, description FROM expenses WHERE user_id = ? ORDER BY date DESC LIMIT 10")
+    query = "SELECT date, amount, category, description FROM expenses WHERE user_id = ? ORDER BY date DESC LIMIT 10"
+    conn = sqlite3.connect("expense_tracker.db")
+    try:
+        df = pd.read_sql(query, conn, params=[user_id])
+        return df
+    except Exception as e:
+        st.error(f"Error loading recent expenses: {str(e)}")
+        return pd.DataFrame(columns=['date', 'amount', 'category', 'description'])
+    finally:
+        conn.close()
 
 def get_budget_performance(user_id):
     current_month = datetime.now().strftime("%Y-%m")
     conn = sqlite3.connect("expense_tracker.db")
-    query = """
-    SELECT c.name, c.budget, COALESCE(SUM(e.amount), 0) as spent
-    FROM categories c
-    LEFT JOIN expenses e ON c.name = e.category AND e.date LIKE ? AND e.user_id = ?
-    GROUP BY c.name, c.budget
-    """
-    df = pd.read_sql(query, conn, params=(f"{current_month}%", user_id))
-    conn.close()
-    return df
+    try:
+        query = """
+        SELECT c.name, c.budget, COALESCE(SUM(e.amount), 0) as spent
+        FROM categories c
+        LEFT JOIN expenses e ON c.name = e.category AND e.date LIKE ? AND e.user_id = ?
+        GROUP BY c.name, c.budget
+        """
+        df = pd.read_sql(query, conn, params=[f"{current_month}%", user_id])
+        return df
+    except Exception as e:
+        st.error(f"Error loading budget performance: {str(e)}")
+        return pd.DataFrame(columns=['name', 'budget', 'spent'])
+    finally:
+        conn.close()
 
 def get_spending_trends(user_id, months=6):
     conn = sqlite3.connect("expense_tracker.db")
-    query = """
-    SELECT DATE(date, 'start of month') as month, 
-           SUM(amount) as total,
-           category,
-           COUNT(*) as transaction_count
-    FROM expenses 
-    WHERE user_id = ? AND date >= date('now', '-' || ? || ' months')
-    GROUP BY month, category
-    ORDER BY month DESC
-    """
-    df = pd.read_sql(query, conn, params=(user_id, months))
-    conn.close()
-    return df
+    try:
+        query = """
+        SELECT DATE(date, 'start of month') as month, 
+               SUM(amount) as total,
+               category,
+               COUNT(*) as transaction_count
+        FROM expenses 
+        WHERE user_id = ? AND date >= date('now', '-' || ? || ' months')
+        GROUP BY month, category
+        ORDER BY month DESC
+        """
+        df = pd.read_sql(query, conn, params=[user_id, months])
+        return df
+    except Exception as e:
+        st.error(f"Error loading spending trends: {str(e)}")
+        return pd.DataFrame(columns=['month', 'total', 'category', 'transaction_count'])
+    finally:
+        conn.close()
 
 def add_expense(user_id, date, amount, category, description, tags, payment_method, recurring):
     conn = sqlite3.connect("expense_tracker.db")
     cursor = conn.cursor()
-    cursor.execute(
-        """
-        INSERT INTO expenses (user_id, date, amount, category, description, tags, payment_method, recurring)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (user_id, date, amount, category, description, tags, payment_method, int(recurring))
-    )
-    conn.commit()
-    conn.close()
+    try:
+        cursor.execute(
+            """
+            INSERT INTO expenses (user_id, date, amount, category, description, tags, payment_method, recurring)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (user_id, date, amount, category, description, tags, payment_method, int(recurring))
+        )
+        conn.commit()
+        return True
+    except Exception as e:
+        st.error(f"Error adding expense: {str(e)}")
+        return False
+    finally:
+        conn.close()
 
 def delete_expense(user_id, expense_id):
     conn = sqlite3.connect("expense_tracker.db")
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM expenses WHERE id = ? AND user_id = ?", (expense_id, user_id))
-    conn.commit()
-    conn.close()
+    try:
+        cursor.execute("DELETE FROM expenses WHERE id = ? AND user_id = ?", (expense_id, user_id))
+        conn.commit()
+        return True
+    except Exception as e:
+        st.error(f"Error deleting expense: {str(e)}")
+        return False
+    finally:
+        conn.close()
 
 def update_expense(user_id, expense_id, date, amount, category, description, tags, payment_method, recurring):
     conn = sqlite3.connect("expense_tracker.db")
     cursor = conn.cursor()
-    cursor.execute(
-        """
-        UPDATE expenses
-        SET date = ?, amount = ?, category = ?, description = ?, tags = ?, payment_method = ?, recurring = ?
-        WHERE id = ? AND user_id = ?
-        """,
-        (date, amount, category, description, tags, payment_method, int(recurring), expense_id, user_id)
-    )
-    conn.commit()
-    conn.close()
+    try:
+        cursor.execute(
+            """
+            UPDATE expenses
+            SET date = ?, amount = ?, category = ?, description = ?, tags = ?, payment_method = ?, recurring = ?
+            WHERE id = ? AND user_id = ?
+            """,
+            (date, amount, category, description, tags, payment_method, int(recurring), expense_id, user_id)
+        )
+        conn.commit()
+        return True
+    except Exception as e:
+        st.error(f"Error updating expense: {str(e)}")
+        return False
+    finally:
+        conn.close()
 
 # --- Authentication ---
 def create_user(username, password):
@@ -207,10 +255,15 @@ def authenticate_user(username, password):
     conn = sqlite3.connect("expense_tracker.db")
     cursor = conn.cursor()
     hashed_password = hashlib.sha256(password.encode()).hexdigest()
-    cursor.execute("SELECT id FROM users WHERE username = ? AND password = ?", (username, hashed_password))
-    result = cursor.fetchone()
-    conn.close()
-    return result[0] if result else None
+    try:
+        cursor.execute("SELECT id FROM users WHERE username = ? AND password = ?", (username, hashed_password))
+        result = cursor.fetchone()
+        return result[0] if result else None
+    except Exception as e:
+        st.error(f"Authentication error: {str(e)}")
+        return None
+    finally:
+        conn.close()
 
 # --- Streamlit App ---
 def main():
@@ -256,23 +309,39 @@ def main():
         st.header("Dashboard")
         recent_expenses = get_recent_expenses(user_id)
         st.subheader("Recent Expenses")
-        st.dataframe(recent_expenses)
+        if not recent_expenses.empty:
+            st.dataframe(recent_expenses)
+        else:
+            st.info("No recent expenses found.")
 
-        current_month = datetime.now().strftime("%Y-%m")
-        last_month = (datetime.now() - timedelta(days=30)).strftime("%Y-%m")
-        df_all = get_expenses(user_id)
-        current_total = df_all[df_all["date"].str.startswith(current_month)]["amount"].sum()
-        last_total = df_all[df_all["date"].str.startswith(last_month)]["amount"].sum()
-        col1, col2 = st.columns(2)
-        col1.metric("This Month", f"₹{current_total:.2f}")
-        col2.metric("Last Month", f"₹{last_total:.2f}")
+        # Monthly totals with error handling
+        try:
+            current_month = datetime.now().strftime("%Y-%m")
+            last_month = (datetime.now() - timedelta(days=30)).strftime("%Y-%m")
+            df_all = get_expenses(user_id)
+            
+            if not df_all.empty:
+                current_total = df_all[df_all["date"].str.startswith(current_month)]["amount"].sum()
+                last_total = df_all[df_all["date"].str.startswith(last_month)]["amount"].sum()
+            else:
+                current_total = 0
+                last_total = 0
+                
+            col1, col2 = st.columns(2)
+            col1.metric("This Month", f"₹{current_total:.2f}")
+            col2.metric("Last Month", f"₹{last_total:.2f}")
+        except Exception as e:
+            st.error(f"Error calculating monthly totals: {str(e)}")
 
         st.subheader("Budget vs Actual")
         budget_df = get_budget_performance(user_id)
-        budget_df["remaining"] = budget_df["budget"] - budget_df["spent"]
-        budget_df.loc[budget_df["remaining"] < 0, "status"] = "Over"
-        budget_df.loc[budget_df["remaining"] >= 0, "status"] = "Good"
-        st.dataframe(budget_df[["name", "budget", "spent", "remaining", "status"]])
+        if not budget_df.empty:
+            budget_df["remaining"] = budget_df["budget"] - budget_df["spent"]
+            budget_df.loc[budget_df["remaining"] < 0, "status"] = "Over"
+            budget_df.loc[budget_df["remaining"] >= 0, "status"] = "Good"
+            st.dataframe(budget_df[["name", "budget", "spent", "remaining", "status"]])
+        else:
+            st.info("No budget data available.")
 
         st.header("Add Expense")
         with st.form("add_expense"):
@@ -284,18 +353,21 @@ def main():
             payment_method = st.selectbox("Payment Method", get_payment_methods())
             recurring = st.checkbox("Recurring")
             if st.form_submit_button("Add Expense"):
-                add_expense(
-                    user_id,
-                    date.strftime("%Y-%m-%d"),
-                    amount,
-                    category,
-                    description,
-                    tags,
-                    payment_method,
-                    recurring
-                )
-                st.success("Expense added successfully!")
-                st.rerun()
+                if amount > 0:
+                    if add_expense(
+                        user_id,
+                        date.strftime("%Y-%m-%d"),
+                        amount,
+                        category,
+                        description,
+                        tags,
+                        payment_method,
+                        recurring
+                    ):
+                        st.success("Expense added successfully!")
+                        st.rerun()
+                else:
+                    st.error("Amount must be greater than 0")
 
         st.header("Expense List")
         with st.expander("Filters"):
@@ -306,7 +378,7 @@ def main():
             apply_filters = st.button("Apply Filters")
 
         df = get_expenses(user_id)
-        if apply_filters:
+        if apply_filters and not df.empty:
             query = "SELECT * FROM expenses WHERE user_id = ?"
             params = []
             if category_filter:
@@ -318,42 +390,50 @@ def main():
             if date_to:
                 query += " AND date <= ?"
                 params.append(date_to.strftime("%Y-%m-%d"))
+            query += " ORDER BY date DESC"
             df = get_expenses(user_id, query, params)
-        st.dataframe(df)
+        
+        if not df.empty:
+            st.dataframe(df)
+        else:
+            st.info("No expenses found.")
 
-        st.subheader("Edit/Delete Expense")
-        expense_id = st.number_input("Expense ID", min_value=0, step=1)
-        if expense_id:
-            expense = df[df["id"] == expense_id]
-            if not expense.empty:
-                expense = expense.iloc[0]
-                with st.form("edit_expense"):
-                    date = st.date_input("Date", value=datetime.strptime(expense["date"], "%Y-%m-%d"))
-                    amount = st.number_input("Amount", value=expense["amount"])
-                    category = st.selectbox("Category", get_categories(), index=get_categories().index(expense["category"]))
-                    description = st.text_input("Description", value=expense["description"])
-                    tags = st.text_input("Tags", value=expense["tags"])
-                    payment_method = st.selectbox("Payment Method", get_payment_methods(), index=get_payment_methods().index(expense["payment_method"]))
-                    recurring = st.checkbox("Recurring", value=bool(expense["recurring"]))
-                    col1, col2 = st.columns(2)
-                    if col1.form_submit_button("Save"):
-                        update_expense(
-                            user_id,
-                            expense_id,
-                            date.strftime("%Y-%m-%d"),
-                            amount,
-                            category,
-                            description,
-                            tags,
-                            payment_method,
-                            recurring
-                        )
-                        st.success("Expense updated successfully!")
-                        st.rerun()
-                    if col2.form_submit_button("Delete"):
-                        delete_expense(user_id, expense_id)
-                        st.success("Expense deleted successfully!")
-                        st.rerun()
+        if not df.empty:
+            st.subheader("Edit/Delete Expense")
+            expense_id = st.number_input("Expense ID", min_value=0, step=1)
+            if expense_id:
+                expense = df[df["id"] == expense_id]
+                if not expense.empty:
+                    expense = expense.iloc[0]
+                    with st.form("edit_expense"):
+                        date = st.date_input("Date", value=datetime.strptime(expense["date"], "%Y-%m-%d"))
+                        amount = st.number_input("Amount", value=float(expense["amount"]))
+                        category = st.selectbox("Category", get_categories(), index=get_categories().index(expense["category"]))
+                        description = st.text_input("Description", value=str(expense["description"]))
+                        tags = st.text_input("Tags", value=str(expense["tags"]))
+                        payment_method = st.selectbox("Payment Method", get_payment_methods(), index=get_payment_methods().index(expense["payment_method"]))
+                        recurring = st.checkbox("Recurring", value=bool(expense["recurring"]))
+                        col1, col2 = st.columns(2)
+                        if col1.form_submit_button("Save"):
+                            if update_expense(
+                                user_id,
+                                expense_id,
+                                date.strftime("%Y-%m-%d"),
+                                amount,
+                                category,
+                                description,
+                                tags,
+                                payment_method,
+                                recurring
+                            ):
+                                st.success("Expense updated successfully!")
+                                st.rerun()
+                        if col2.form_submit_button("Delete"):
+                            if delete_expense(user_id, expense_id):
+                                st.success("Expense deleted successfully!")
+                                st.rerun()
+                else:
+                    st.error("Expense ID not found")
 
         st.header("Reports")
         report_type = st.selectbox("Report Type", ["Category Breakdown", "Trends", "Payment Methods"])
@@ -374,17 +454,25 @@ def main():
             GROUP BY category
             ORDER BY total DESC
             """
-            df_report = get_expenses(user_id, query, (date_start, date_end))
-            fig = px.bar(df_report, x="category", y="total", title=f"Category Breakdown for {month} {year}")
-            st.plotly_chart(fig)
+            df_report = get_expenses(user_id, query, [date_start, date_end])
+            if not df_report.empty:
+                fig = px.bar(df_report, x="category", y="total", title=f"Category Breakdown for {month} {year}")
+                st.plotly_chart(fig)
+            else:
+                st.info(f"No expenses found for {month} {year}")
         elif report_type == "Trends":
             trends = get_spending_trends(user_id)
-            fig = px.bar(trends, x="month", y="total", color="category", title="Monthly Spending Trends")
-            st.plotly_chart(fig)
+            if not trends.empty:
+                fig = px.bar(trends, x="month", y="total", color="category", title="Monthly Spending Trends")
+                st.plotly_chart(fig)
+            else:
+                st.info("No trend data available")
         elif report_type == "Payment Methods":
             current_month = datetime.now().strftime("%B")
             current_year = datetime.now().strftime("%Y")
-            month = st.selectbox("Month", list(calendar.month_name[1:]), index=int(current_month)-1)
+            month_names = list(calendar.month_name[1:])
+            index = month_names.index(current_month) if current_month in month_names else 0
+            month = st.selectbox("Month", month_names, index=index)
             year = st.selectbox("Year", [str(y) for y in range(2020, 2031)], index=int(current_year)-2020)
             month_num = list(calendar.month_name).index(month)
             date_start = f"{year}-{month_num:02d}-01"
@@ -395,9 +483,12 @@ def main():
             WHERE user_id = ? AND date BETWEEN ? AND ?
             GROUP BY payment_method
             """
-            df_report = get_expenses(user_id, query, (date_start, date_end))
-            fig = px.pie(df_report, values="total", names="payment_method", title=f"Payment Methods for {month} {year}")
-            st.plotly_chart(fig)
+            df_report = get_expenses(user_id, query, [date_start, date_end])
+            if not df_report.empty:
+                fig = px.pie(df_report, values="total", names="payment_method", title=f"Payment Methods for {month} {year}")
+                st.plotly_chart(fig)
+            else:
+                st.info(f"No payment method data for {month} {year}")
 
 if __name__ == "__main__":
     main()
